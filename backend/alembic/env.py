@@ -7,6 +7,9 @@ from sqlalchemy import pool
 
 from alembic import context
 
+from app.database import Base
+from app.models import User
+
 
 # Load environment variables from .env
 load_dotenv()
@@ -24,9 +27,19 @@ if not database_url:
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# No application models yet.
-# This will be connected to Base.metadata when models are introduced.
-target_metadata = None
+
+def include_object(object, name, type_, reflected, compare_to):
+    """
+    Exclude PostGIS/system tables from Alembic autogenerate.
+    """
+    if type_ == "table" and reflected and name == "spatial_ref_sys":
+        return False
+
+    return True
+
+
+# SQLAlchemy metadata for Alembic autogenerate
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
@@ -35,6 +48,7 @@ def run_migrations_offline() -> None:
     context.configure(
         url=database_url,
         target_metadata=target_metadata,
+        include_object=include_object,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -56,6 +70,7 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
+            include_object=include_object,
         )
 
         with context.begin_transaction():
