@@ -5,6 +5,7 @@ Revises:
 Create Date: 2026-10-13
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -22,8 +23,12 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Replace the legacy development users table with the approved users schema."""
 
-    # Replace the legacy development table.
-    op.drop_table("users")
+    # Replace the legacy development table if it exists.
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+
+    if "users" in inspector.get_table_names():
+        op.drop_table("users")
 
     op.create_table(
         "users",
