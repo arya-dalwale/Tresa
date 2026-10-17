@@ -1,4 +1,6 @@
 from datetime import datetime
+from uuid import UUID
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -200,4 +202,87 @@ def calculate_preference_score(
     return calculate_preference_compatibility(
         journey_preferences,
         candidate_preferences,
+    )
+
+
+def normalize_score(score: float) -> float:
+    """
+    Normalize and validate a matching component score.
+
+    Every matching component must produce a score between 0.0 and 1.0.
+    """
+
+    if not 0.0 <= score <= 1.0:
+        raise ValueError(
+            f"Matching component score must be between 0.0 and 1.0: {score}"
+        )
+
+    return float(score)
+
+
+def calculate_weighted_score(
+    component_scores: dict[str, float | None],
+) -> float:
+    """
+    Calculate the final weighted compatibility score.
+
+    Unavailable components are represented by None and are excluded
+    from both the numerator and denominator.
+
+    The remaining component weights are renormalized proportionally.
+
+    Route overlap is currently unavailable because the Journey contract
+    does not contain route/polyline/waypoint data.
+    """
+
+    weighted_total = 0.0
+    available_weight = 0.0
+
+    for component, weight in MATCHING_WEIGHTS.items():
+        score = component_scores.get(component)
+
+        if score is None:
+            continue
+
+        normalized_score = normalize_score(score)
+
+        weighted_total += normalized_score * weight
+        available_weight += weight
+
+    if available_weight == 0.0:
+        raise ValueError(
+            "At least one matching component must be available"
+        )
+
+    final_score = weighted_total / available_weight
+
+    return max(0.0, min(1.0, final_score))
+
+
+def calculate_match_score(
+    component_scores: dict[str, float | None],
+) -> float:
+    """
+    Calculate the final compatibility score for one candidate.
+    """
+
+    return calculate_weighted_score(component_scores)
+
+
+def rank_candidates(
+    candidates: list[tuple[UUID, float]],
+) -> list[tuple[UUID, float]]:
+    """
+    Rank candidates from highest compatibility score to lowest.
+
+    UUID string is used as a deterministic tie-breaker so equal
+    scores always produce the same ordering.
+    """
+
+    return sorted(
+        candidates,
+        key=lambda candidate: (
+            -candidate[1],
+            str(candidate[0]),
+        ),
     )
