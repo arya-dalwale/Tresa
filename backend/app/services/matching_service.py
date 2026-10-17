@@ -42,3 +42,29 @@ def find_candidate_journeys(
     )
 
     return list(db.scalars(statement).all())
+
+
+def calculate_destination_distance(
+    db: Session,
+    journey: Journey,
+    candidate: Journey,
+) -> float:
+    """
+    Calculate the distance in meters between two journey destinations.
+
+    The distance calculation is performed by PostGIS using
+    geography coordinates.
+    """
+
+    statement = select(
+        Journey.destination.ST_Distance(
+            candidate.destination,
+        )
+    ).where(Journey.id == journey.id)
+
+    distance_meters = db.scalar(statement)
+
+    if distance_meters is None:
+        raise ValueError("Unable to calculate destination distance")
+
+    return float(distance_meters)
