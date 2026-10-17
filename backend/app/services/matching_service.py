@@ -4,6 +4,16 @@ from sqlalchemy.orm import Session
 from app.models.journey import Journey
 
 
+MATCHING_WEIGHTS = {
+    "route": 0.30,
+    "destination": 0.25,
+    "time": 0.20,
+    "origin_proximity": 0.10,
+    "preferences": 0.10,
+    "luggage": 0.05,
+}
+
+
 def find_candidate_journeys(
     db: Session,
     journey: Journey,
