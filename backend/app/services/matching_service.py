@@ -152,3 +152,46 @@ def calculate_origin_proximity(
     )
 
     return max(0.0, min(1.0, score))
+
+
+def calculate_luggage_compatibility(
+    journey: Journey,
+    candidate: Journey,
+) -> float:
+    """
+    Calculate luggage compatibility between two journeys.
+
+    Returns a score between 0.0 and 1.0.
+
+    1.0 = same luggage requirement
+    0.5 = one level difference
+    0.0 = maximum luggage difference
+    """
+
+    luggage_levels = {
+        "small": 0,
+        "medium": 1,
+        "large": 2,
+    }
+
+    journey_luggage = journey.luggage
+    candidate_luggage = candidate.luggage
+
+    if journey_luggage not in luggage_levels:
+        raise ValueError("Invalid journey luggage value")
+
+    if candidate_luggage not in luggage_levels:
+        raise ValueError("Invalid candidate luggage value")
+
+    difference = abs(
+        luggage_levels[journey_luggage]
+        - luggage_levels[candidate_luggage]
+    )
+
+    if difference == 0:
+        return 1.0
+
+    if difference == 1:
+        return 0.5
+
+    return 0.0

@@ -4,6 +4,7 @@ from unittest.mock import Mock
 from app.models.journey import Journey
 from app.services.matching_service import (
     calculate_destination_distance,
+    calculate_luggage_compatibility,
     calculate_origin_proximity,
     calculate_time_compatibility,
     find_candidate_journeys,
@@ -275,3 +276,61 @@ def test_calculate_origin_proximity_at_search_radius():
 
     assert result == 0.0
     db.scalar.assert_called_once()
+
+
+def test_calculate_luggage_compatibility_same_luggage():
+    journey = Journey(
+        origin="SRID=4326;POINT(73.8567 18.5204)",
+        destination="SRID=4326;POINT(73.8567 18.5204)",
+        departure_time=datetime.now(timezone.utc),
+        passengers=1,
+        luggage="medium",
+        radius_km=10.0,
+        status="planned",
+    )
+
+    candidate = Journey(
+        origin="SRID=4326;POINT(73.8567 18.5204)",
+        destination="SRID=4326;POINT(73.8567 18.5204)",
+        departure_time=datetime.now(timezone.utc),
+        passengers=1,
+        luggage="medium",
+        radius_km=10.0,
+        status="planned",
+    )
+
+    result = calculate_luggage_compatibility(
+        journey,
+        candidate,
+    )
+
+    assert result == 1.0
+
+
+def test_calculate_luggage_compatibility_one_level_difference():
+    journey = Journey(
+        origin="SRID=4326;POINT(73.8567 18.5204)",
+        destination="SRID=4326;POINT(73.8567 18.5204)",
+        departure_time=datetime.now(timezone.utc),
+        passengers=1,
+        luggage="small",
+        radius_km=10.0,
+        status="planned",
+    )
+
+    candidate = Journey(
+        origin="SRID=4326;POINT(73.8567 18.5204)",
+        destination="SRID=4326;POINT(73.8567 18.5204)",
+        departure_time=datetime.now(timezone.utc),
+        passengers=1,
+        luggage="medium",
+        radius_km=10.0,
+        status="planned",
+    )
+
+    result = calculate_luggage_compatibility(
+        journey,
+        candidate,
+    )
+
+    assert result == 0.5
