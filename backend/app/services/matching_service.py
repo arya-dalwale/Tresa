@@ -110,3 +110,45 @@ def calculate_time_compatibility(
     )
 
     return max(0.0, min(1.0, score))
+
+
+def calculate_origin_proximity(
+    db: Session,
+    journey: Journey,
+    candidate: Journey,
+) -> float:
+    """
+    Calculate origin proximity between two journeys.
+
+    Returns a score between 0.0 and 1.0.
+
+    1.0 = same origin
+    0.0 = candidate is at or beyond the journey's search radius.
+
+    The geographic distance is calculated by PostGIS.
+    """
+
+    statement = select(
+        Journey.origin.ST_Distance(
+            candidate.origin,
+        )
+    ).where(Journey.id == journey.id)
+
+    distance_meters = db.scalar(statement)
+
+    if distance_meters is None:
+        raise ValueError("Unable to calculate origin distance")
+
+    max_distance_meters = journey.radius_km * 1000
+
+    if max_distance_meters <= 0:
+        raise ValueError("Journey radius must be greater than zero")
+
+    if distance_meters >= max_distance_meters:
+        return 0.0
+
+    score = 1.0 - (
+        distance_meters / max_distance_meters
+    )
+
+    return max(0.0, min(1.0, score))
