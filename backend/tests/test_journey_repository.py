@@ -2,6 +2,8 @@ from datetime import datetime, timedelta, timezone
 import uuid
 from unittest.mock import Mock
 
+from sqlalchemy.dialects import postgresql
+
 from app.models.journey import Journey
 from app.repositories.journey_repository import (
     create_journey,
@@ -30,6 +32,10 @@ def create_test_journey(
     )
 
 
+# ==================================================
+# GET JOURNEY BY ID
+# ==================================================
+
 def test_get_journey_by_id():
     db = Mock()
     journey = create_test_journey()
@@ -41,6 +47,22 @@ def test_get_journey_by_id():
     assert result == journey
     db.scalar.assert_called_once()
 
+
+def test_get_journey_by_id_returns_none_when_not_found():
+    db = Mock()
+    journey_id = uuid.uuid4()
+
+    db.scalar.return_value = None
+
+    result = get_journey_by_id(db, journey_id)
+
+    assert result is None
+    db.scalar.assert_called_once()
+
+
+# ==================================================
+# GET JOURNEYS BY USER
+# ==================================================
 
 def test_get_journeys_by_user():
     db = Mock()
@@ -59,6 +81,40 @@ def test_get_journeys_by_user():
     assert result == [journey_one, journey_two]
     db.scalars.assert_called_once()
 
+
+def test_get_journeys_by_user_returns_empty_list():
+    db = Mock()
+    user_id = uuid.uuid4()
+
+    db.scalars.return_value.all.return_value = []
+
+    result = get_journeys_by_user(db, user_id)
+
+    assert result == []
+    db.scalars.assert_called_once()
+
+
+def test_get_journeys_by_user_orders_newest_first():
+    db = Mock()
+    db.scalars.return_value.all.return_value = []
+
+    get_journeys_by_user(db, uuid.uuid4())
+
+    statement = db.scalars.call_args.args[0]
+
+    sql = str(
+        statement.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+
+    assert "ORDER BY journeys.created_at DESC" in sql
+
+
+# ==================================================
+# GET ACTIVE JOURNEYS
+# ==================================================
 
 def test_get_active_journeys():
     db = Mock()
@@ -81,6 +137,39 @@ def test_get_active_journeys():
     db.scalars.assert_called_once()
 
 
+def test_get_active_journeys_returns_empty_list():
+    db = Mock()
+    db.scalars.return_value.all.return_value = []
+
+    result = get_active_journeys(db)
+
+    assert result == []
+    db.scalars.assert_called_once()
+
+
+def test_get_active_journeys_filters_status_and_orders_by_departure():
+    db = Mock()
+    db.scalars.return_value.all.return_value = []
+
+    get_active_journeys(db)
+
+    statement = db.scalars.call_args.args[0]
+
+    sql = str(
+        statement.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+
+    assert "journeys.status IN ('planned', 'active')" in sql
+    assert "ORDER BY journeys.departure_time ASC" in sql
+
+
+# ==================================================
+# GET JOURNEYS BY DEPARTURE TIME
+# ==================================================
+
 def test_get_journeys_by_departure_time():
     db = Mock()
 
@@ -92,7 +181,6 @@ def test_get_journeys_by_departure_time():
         0,
         tzinfo=timezone.utc,
     )
-
     end_time = start_time + timedelta(hours=2)
 
     journey = create_test_journey()
@@ -110,6 +198,70 @@ def test_get_journeys_by_departure_time():
     db.scalars.assert_called_once()
 
 
+def test_get_journeys_by_departure_time_returns_empty_list():
+    db = Mock()
+
+    start_time = datetime(
+        2026,
+        10,
+        17,
+        10,
+        0,
+        tzinfo=timezone.utc,
+    )
+    end_time = start_time + timedelta(hours=2)
+
+    db.scalars.return_value.all.return_value = []
+
+    result = get_journeys_by_departure_time(
+        db,
+        start_time,
+        end_time,
+    )
+
+    assert result == []
+    db.scalars.assert_called_once()
+
+
+def test_get_journeys_by_departure_time_uses_inclusive_boundaries():
+    db = Mock()
+
+    start_time = datetime(
+        2026,
+        10,
+        17,
+        10,
+        0,
+        tzinfo=timezone.utc,
+    )
+    end_time = start_time + timedelta(hours=2)
+
+    db.scalars.return_value.all.return_value = []
+
+    get_journeys_by_departure_time(
+        db,
+        start_time,
+        end_time,
+    )
+
+    statement = db.scalars.call_args.args[0]
+
+    sql = str(
+        statement.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+
+    assert "journeys.departure_time >=" in sql
+    assert "journeys.departure_time <=" in sql
+    assert "ORDER BY journeys.departure_time ASC" in sql
+
+
+# ==================================================
+# CREATE JOURNEY
+# ==================================================
+
 def test_create_journey():
     db = Mock()
     journey = create_test_journey()
@@ -122,6 +274,10 @@ def test_create_journey():
     db.refresh.assert_called_once_with(journey)
 
 
+# ==================================================
+# UPDATE JOURNEY
+# ==================================================
+
 def test_update_journey():
     db = Mock()
     journey = create_test_journey()
@@ -132,6 +288,10 @@ def test_update_journey():
     db.commit.assert_called_once()
     db.refresh.assert_called_once_with(journey)
 
+
+# ==================================================
+# DELETE JOURNEY
+# ==================================================
 
 def test_delete_journey():
     db = Mock()
