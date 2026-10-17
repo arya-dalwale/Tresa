@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -68,3 +70,43 @@ def calculate_destination_distance(
         raise ValueError("Unable to calculate destination distance")
 
     return float(distance_meters)
+
+
+def calculate_time_compatibility(
+    journey: Journey,
+    candidate: Journey,
+    max_difference_minutes: int = 60,
+) -> float:
+    """
+    Calculate departure-time compatibility between two journeys.
+
+    Returns a score between 0.0 and 1.0.
+
+    1.0 = same departure time
+    0.0 = difference is equal to or greater than the
+          configured maximum difference.
+    """
+
+    if not isinstance(journey.departure_time, datetime):
+        raise ValueError("Journey departure_time must be a datetime")
+
+    if not isinstance(candidate.departure_time, datetime):
+        raise ValueError("Candidate departure_time must be a datetime")
+
+    difference_seconds = abs(
+        (
+            journey.departure_time
+            - candidate.departure_time
+        ).total_seconds()
+    )
+
+    difference_minutes = difference_seconds / 60
+
+    if difference_minutes >= max_difference_minutes:
+        return 0.0
+
+    score = 1.0 - (
+        difference_minutes / max_difference_minutes
+    )
+
+    return max(0.0, min(1.0, score))
