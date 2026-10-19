@@ -296,6 +296,11 @@ def test_preference_score_no_preference():
     assert score == 1.0
 
 
+# ============================================================
+# SCORING & RANKING V1 TESTS
+# ============================================================
+
+
 def test_perfect_match_score_without_route():
     component_scores = {
         "route": None,
@@ -408,9 +413,17 @@ def test_score_always_between_zero_and_one():
 
 
 def test_rank_candidates_highest_to_lowest():
-    candidate_one = UUID("00000000-0000-0000-0000-000000000001")
-    candidate_two = UUID("00000000-0000-0000-0000-000000000002")
-    candidate_three = UUID("00000000-0000-0000-0000-000000000003")
+    candidate_one = UUID(
+        "00000000-0000-0000-0000-000000000001"
+    )
+
+    candidate_two = UUID(
+        "00000000-0000-0000-0000-000000000002"
+    )
+
+    candidate_three = UUID(
+        "00000000-0000-0000-0000-000000000003"
+    )
 
     candidates = [
         (candidate_one, 0.40),
@@ -427,9 +440,14 @@ def test_rank_candidates_highest_to_lowest():
     ]
 
 
-def test_rank_candidates_equal_scores_are_deterministic():
-    candidate_one = UUID("00000000-0000-0000-0000-000000000001")
-    candidate_two = UUID("00000000-0000-0000-0000-000000000002")
+def test_rank_candidates_equal_scores_remain_tied():
+    candidate_one = UUID(
+        "00000000-0000-0000-0000-000000000001"
+    )
+
+    candidate_two = UUID(
+        "00000000-0000-0000-0000-000000000002"
+    )
 
     candidates = [
         (candidate_two, 0.80),
@@ -438,10 +456,8 @@ def test_rank_candidates_equal_scores_are_deterministic():
 
     ranked = rank_candidates(candidates)
 
-    assert ranked == [
-        (candidate_one, 0.80),
-        (candidate_two, 0.80),
-    ]
+    # Equal scores remain tied and preserve their original order.
+    assert ranked == candidates
 
 
 def test_invalid_component_score_is_rejected():

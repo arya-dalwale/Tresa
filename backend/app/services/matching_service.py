@@ -24,13 +24,11 @@ def find_candidate_journeys(
     journey: Journey,
 ) -> list[Journey]:
     """
-    Find candidate journeys that:
-    - are not the target journey
-    - have planned or active status
-    - are within the target journey's search radius
-    """
+    Find active/planned journeys whose origins are within
+    the target journey's search radius.
 
-    radius_meters = journey.radius_km * 1000
+    The target journey itself is excluded.
+    """
 
     statement = (
         select(Journey)
@@ -39,7 +37,7 @@ def find_candidate_journeys(
             Journey.status.in_(["planned", "active"]),
             Journey.origin.ST_DWithin(
                 journey.origin,
-                radius_meters,
+                journey.radius_km * 1000,
             ),
         )
     )
@@ -53,8 +51,7 @@ def calculate_destination_distance(
     candidate: Journey,
 ) -> float:
     """
-    Calculate the distance between the destinations
-    of the target journey and candidate journey in meters.
+    Calculate the distance in meters between the two destinations.
     """
 
     statement = select(
@@ -79,9 +76,11 @@ def calculate_time_compatibility(
     """
     Calculate departure-time compatibility.
 
-    Same departure time = 1.0
-    Difference >= max_difference_minutes = 0.0
-    Values between them are linearly scaled.
+    Same departure time = 1.0.
+
+    Difference equal to or greater than max_difference_minutes = 0.0.
+
+    Differences in between are linearly scaled between 1.0 and 0.0.
     """
 
     if not isinstance(journey.departure_time, datetime):
@@ -90,21 +89,23 @@ def calculate_time_compatibility(
     if not isinstance(candidate.departure_time, datetime):
         raise ValueError("Candidate departure_time must be a datetime")
 
-    difference_minutes = abs(
+    difference_seconds = abs(
         (
-            journey.departure_time - candidate.departure_time
+            journey.departure_time
+            - candidate.departure_time
         ).total_seconds()
-    ) / 60
+    )
 
-    if difference_minutes == 0:
-        return 1.0
+    difference_minutes = difference_seconds / 60
 
     if difference_minutes >= max_difference_minutes:
         return 0.0
 
-    return 1.0 - (
+    score = 1.0 - (
         difference_minutes / max_difference_minutes
     )
+
+    return max(0.0, min(1.0, score))
 
 
 def calculate_origin_proximity(
@@ -113,11 +114,13 @@ def calculate_origin_proximity(
     candidate: Journey,
 ) -> float:
     """
-    Calculate origin proximity score.
+    Calculate origin proximity.
 
-    Same origin = 1.0
-    At or beyond search radius = 0.0
-    Closer origins receive a higher score.
+    Same origin = 1.0.
+
+    Origin at or beyond the search radius = 0.0.
+
+    The score decreases linearly as distance increases.
     """
 
     statement = select(
@@ -134,7 +137,7 @@ def calculate_origin_proximity(
     max_distance_meters = journey.radius_km * 1000
 
     if max_distance_meters <= 0:
-        raise ValueError("Journey radius must be greater than zero")
+        raise ValueError("Journey radius_km must be greater than zero")
 
     if distance_meters >= max_distance_meters:
         return 0.0
@@ -153,9 +156,11 @@ def calculate_luggage_compatibility(
     """
     Calculate luggage compatibility.
 
-    Same luggage size = 1.0
-    One level difference = 0.5
-    Maximum difference = 0.0
+    Same luggage level = 1.0.
+
+    One level difference = 0.5.
+
+    Maximum level difference = 0.0.
     """
 
     luggage_levels = {
@@ -177,7 +182,9 @@ def calculate_luggage_compatibility(
             f"Invalid candidate luggage value: {candidate.luggage}"
         )
 
-    difference = abs(journey_level - candidate_level)
+    difference = abs(
+        journey_level - candidate_level
+    )
 
     if difference == 0:
         return 1.0
@@ -207,14 +214,14 @@ def calculate_preference_score(
 
 def normalize_score(score: float) -> float:
     """
-    Normalize and validate a matching component score.
-
-    Every matching component must produce a score between 0.0 and 1.0.
+    Validate that a matching component score is normalized
+    between 0.0 and 1.0.
     """
 
     if not 0.0 <= score <= 1.0:
         raise ValueError(
-            f"Matching component score must be between 0.0 and 1.0: {score}"
+            "Matching component score must be between 0.0 and 1.0: "
+            f"{score}"
         )
 
     return float(score)
@@ -231,8 +238,8 @@ def calculate_weighted_score(
 
     The remaining component weights are renormalized proportionally.
 
-    Route overlap is currently unavailable because the Journey contract
-    does not contain route/polyline/waypoint data.
+    Route overlap is currently unavailable because the Journey
+    contract does not contain route/polyline/waypoint data.
     """
 
     weighted_total = 0.0
@@ -256,17 +263,25 @@ def calculate_weighted_score(
 
     final_score = weighted_total / available_weight
 
-    return max(0.0, min(1.0, final_score))
+    return max(
+        0.0,
+        min(1.0, final_score),
+    )
 
 
 def calculate_match_score(
     component_scores: dict[str, float | None],
 ) -> float:
     """
-    Calculate the final compatibility score for one candidate.
+    Calculate the final V1 matching score.
+
+    Route overlap is excluded when unavailable and the remaining
+    weights are renormalized.
     """
 
-    return calculate_weighted_score(component_scores)
+    return calculate_weighted_score(
+        component_scores
+    )
 
 
 def rank_candidates(
@@ -275,14 +290,10 @@ def rank_candidates(
     """
     Rank candidates from highest compatibility score to lowest.
 
-    UUID string is used as a deterministic tie-breaker so equal
-    scores always produce the same ordering.
+    Equal scores remain tied and preserve their original order.
     """
 
     return sorted(
         candidates,
-        key=lambda candidate: (
-            -candidate[1],
-            str(candidate[0]),
-        ),
+        key=lambda candidate: -candidate[1],
     )
