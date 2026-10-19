@@ -1,13 +1,21 @@
 from datetime import datetime, timedelta, timezone
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
+from app.database.session import SessionLocal
 from app.main import app
+from app.models.journey import Journey
 
 
 client = TestClient(app)
 
+
+# ==========================================================
+# TEST HELPERS
+# ==========================================================
 
 def register_and_login() -> str:
     """Register a unique test user and return the access token."""
@@ -55,7 +63,6 @@ def journey_payload(
     passengers: int = 1,
 ) -> dict:
     """Create a Journey API request payload."""
-
     return {
         "origin": {
             "latitude": origin[0],
@@ -77,7 +84,6 @@ def create_journey(
     payload: dict,
 ) -> dict:
     """Create a journey through the existing authenticated API."""
-
     response = client.post(
         "/journeys",
         json=payload,
@@ -95,9 +101,8 @@ def create_matching_scenario() -> dict:
 
     Candidate one has the same destination as the target.
     Candidate two has a farther destination and should score lower.
-    All three journeys are in an isolated geographic area.
+    All three journeys are created in an isolated geographic area.
     """
-
     target_token = register_and_login()
     candidate_one_token = register_and_login()
     candidate_two_token = register_and_login()
@@ -402,3 +407,169 @@ def test_matches_support_limit_and_offset():
 
     assert len(matches) == 1
     assert matches[0]["journey_id"] == scenario["candidate_two_id"]
+
+
+# ==========================================================
+# EDGE CASES
+# ==========================================================
+
+def test_completed_and_cancelled_candidates_are_excluded():
+    target_token = register_and_login()
+    completed_token = register_and_login()
+    cancelled_token = register_and_login()
+
+    base_latitude, base_longitude = unique_origin()
+
+    destination = (
+        base_latitude + 1.0,
+        base_longitude + 1.0,
+    )
+
+    departure_time = (
+        datetime.now(timezone.utc) + timedelta(days=2)
+    ).isoformat()
+
+    target = create_journey(
+        target_token,
+        journey_payload(
+            origin=(base_latitude, base_longitude),
+            destination=destination,
+            departure_time=departure_time,
+        ),
+    )
+
+    completed = create_journey(
+        completed_token,
+        journey_payload(
+            origin=(base_latitude + 0.001, base_longitude),
+            destination=destination,
+            departure_time=departure_time,
+        ),
+    )
+
+    cancelled = create_journey(
+        cancelled_token,
+        journey_payload(
+            origin=(base_latitude + 0.002, base_longitude),
+            destination=destination,
+            departure_time=departure_time,
+        ),
+    )
+
+    completed_update = client.patch(
+        f"/journeys/{completed['id']}",
+        json={"status": "completed"},
+        headers={"Authorization": f"Bearer {completed_token}"},
+    )
+
+    cancelled_update = client.patch(
+        f"/journeys/{cancelled['id']}",
+        json={"status": "cancelled"},
+        headers={"Authorization": f"Bearer {cancelled_token}"},
+    )
+
+    assert completed_update.status_code == 200
+    assert cancelled_update.status_code == 200
+
+    response = client.get(
+        f"/journeys/{target['id']}/matches",
+        headers={"Authorization": f"Bearer {target_token}"},
+    )
+
+    assert response.status_code == 200
+
+    match_ids = {
+        match["journey_id"]
+        for match in response.json()["matches"]
+    }
+
+    assert completed["id"] not in match_ids
+    assert cancelled["id"] not in match_ids
+
+    for group in response.json()["groups"]:
+        group_member_ids = {
+            member["journey_id"]
+            for member in group["members"]
+        }
+        assert completed["id"] not in group_member_ids
+        assert cancelled["id"] not in group_member_ids
+
+
+def test_matches_support_candidates_without_profiles():
+    scenario = create_matching_scenario()
+
+    response = client.get(
+        f"/journeys/{scenario['target_id']}/matches",
+        headers={"Authorization": f"Bearer {scenario['token']}"},
+    )
+
+    assert response.status_code == 200
+
+    matches = response.json()["matches"]
+    assert matches
+
+    candidate_ids = {
+        scenario["candidate_one_id"],
+        scenario["candidate_two_id"],
+    }
+
+    candidate_matches = [
+        match
+        for match in matches
+        if match["journey_id"] in candidate_ids
+    ]
+
+    assert len(candidate_matches) == 2
+
+    for match in candidate_matches:
+        assert match["full_name"] is None
+        assert match["profile_photo_url"] is None
+
+
+def test_origin_distance_uses_actual_postgis_distance():
+    scenario = create_matching_scenario()
+
+    with SessionLocal() as db:
+        target = db.get(
+            Journey,
+            uuid.UUID(scenario["target_id"]),
+        )
+        candidate = db.get(
+            Journey,
+            uuid.UUID(scenario["candidate_one_id"]),
+        )
+
+        assert target is not None
+        assert candidate is not None
+
+        expected_distance_meters = db.scalar(
+            select(
+                Journey.origin.ST_Distance(candidate.origin)
+            ).where(
+                Journey.id == target.id
+            )
+        )
+
+        assert expected_distance_meters is not None
+
+        expected_distance_km = float(
+            expected_distance_meters
+        ) / 1000.0
+
+    response = client.get(
+        f"/journeys/{scenario['target_id']}/matches",
+        headers={"Authorization": f"Bearer {scenario['token']}"},
+    )
+
+    assert response.status_code == 200
+
+    candidate_match = next(
+        match
+        for match in response.json()["matches"]
+        if match["journey_id"] == scenario["candidate_one_id"]
+    )
+
+    assert candidate_match["origin_distance_km"] == pytest.approx(
+        expected_distance_km,
+        abs=1e-9,
+    )
