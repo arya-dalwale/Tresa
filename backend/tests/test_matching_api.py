@@ -573,3 +573,106 @@ def test_origin_distance_uses_actual_postgis_distance():
         expected_distance_km,
         abs=1e-9,
     )
+
+
+# ==========================================================
+# ADDITIONAL API CONTRACT AND REGRESSION TESTS
+# ==========================================================
+
+def test_matches_accept_limit_minimum_boundary():
+    scenario = create_matching_scenario()
+
+    response = client.get(
+        f"/journeys/{scenario['target_id']}/matches?limit=1&offset=0",
+        headers={
+            "Authorization": f"Bearer {scenario['token']}",
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["matches"]) <= 1
+    assert len(response.json()["groups"]) <= 1
+
+
+def test_matches_accept_limit_maximum_boundary():
+    scenario = create_matching_scenario()
+
+    response = client.get(
+        f"/journeys/{scenario['target_id']}/matches?limit=100&offset=0",
+        headers={
+            "Authorization": f"Bearer {scenario['token']}",
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["matches"]) <= 100
+    assert len(response.json()["groups"]) <= 100
+
+
+def test_individual_match_response_fields_follow_contract():
+    scenario = create_matching_scenario()
+
+    response = client.get(
+        f"/journeys/{scenario['target_id']}/matches",
+        headers={
+            "Authorization": f"Bearer {scenario['token']}",
+        },
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert set(data.keys()) == {"matches", "groups"}
+    assert data["matches"]
+
+    match = data["matches"][0]
+
+    assert set(match.keys()) == {
+        "journey_id",
+        "user_id",
+        "full_name",
+        "profile_photo_url",
+        "departure_time",
+        "passengers",
+        "luggage",
+        "origin_distance_km",
+        "compatibility_score",
+        "score_breakdown",
+    }
+
+    assert set(match["score_breakdown"].keys()) == {
+        "route",
+        "destination",
+        "time",
+        "origin_proximity",
+        "preferences",
+        "luggage",
+    }
+
+
+def test_matching_api_openapi_documents_pagination_and_auth():
+    openapi = app.openapi()
+
+    path = "/journeys/{journey_id}/matches"
+
+    assert path in openapi["paths"]
+
+    operation = openapi["paths"][path]["get"]
+
+    parameters = {
+        parameter["name"]: parameter
+        for parameter in operation["parameters"]
+        if parameter["in"] == "query"
+    }
+
+    assert "limit" in parameters
+    assert parameters["limit"]["schema"]["default"] == 20
+    assert parameters["limit"]["schema"]["minimum"] == 1
+    assert parameters["limit"]["schema"]["maximum"] == 100
+
+    assert "offset" in parameters
+    assert parameters["offset"]["schema"]["default"] == 0
+    assert parameters["offset"]["schema"]["minimum"] == 0
+
+    assert operation.get("security")
